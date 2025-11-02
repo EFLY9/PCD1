@@ -434,9 +434,17 @@ if not st.session_state.extracted_data.empty:
                         st.session_state.upload_count += 1
                         st.success(f"✅ Successfully populated {result} rows in Column {target_column}")
                         st.success(f"📄 New file: `{os.path.basename(new_file)}`")
+
+                         # Download button
+                        with open(new_file, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Download Populated Excel File",
+                                data=f.read(),
+                                file_name=os.path.basename(new_file),
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary"
+                            )
                         
-                        # Show file location
-                        st.info(f"📂 File saved to: `{new_file}`")
                         st.info("💡 Ready for next upload - upload another image to populate the other column")
                     else:
                         st.error(f"❌ Error populating data: {result}")
