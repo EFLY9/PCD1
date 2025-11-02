@@ -11,7 +11,7 @@ import io
 import shutil
 
 # Template path
-TEMPLATE_PATH = "/Users/fuxinghuang/Documents/Gasmet Reference Limits -Chemical Burning.xlsx"
+TEMPLATE_PATH = "Gasmet Reference Limits -Chemical Burning.xlsx"
 
 # Expected components in exact order
 EXPECTED_COMPONENTS = [
