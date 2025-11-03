@@ -37,7 +37,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🇸🇬 https://www.sgcleaningxpert.com/wp-content/uploads/2017/10/NEA-Logo1.png NEA Gasmet OCR Populator")
+st.title("https://www.sgcleaningxpert.com/wp-content/uploads/2017/10/NEA-Logo1.png" "NEA Gasmet OCR Populator")
 st.markdown("---")
 
 
