@@ -390,67 +390,96 @@ else:
 st.markdown("---")
 
 # Section 4: Populate Excel
+# ==================== 4️⃣ POPULATE EXCEL (UPDATED) ====================
+
 st.header("4️⃣ Populate Excel File")
 
 if not st.session_state.extracted_data.empty:
-    # Check current column status
-    b_has_data, c_has_data = check_column_status(TEMPLATE_PATH)
-    
-    # Determine target column
-    if not b_has_data:
-        target_column = "B"
-        st.info("📍 Column B is empty → Data will populate to Column B (1st reading)")
-    elif not c_has_data:
-        target_column = "C"
-        st.info("📍 Column B has data → Data will populate to Column C (2nd reading)")
+    # --------------------------------------------------------------
+    # 1. Determine which file we are working on
+    # --------------------------------------------------------------
+    if st.session_state.working_file is None or not os.path.exists(st.session_state.working_file):
+        # No file yet → create the first copy
+        new_file = create_working_copy()
+        if new_file:
+            st.session_state.working_file = new_file
+            st.info(f"Created new working file: `{os.path.basename(new_file)}`")
+        else:
+            st.stop()
     else:
-        st.warning("⚠️ Both columns B and C have data. Clear the template first or choose manually:")
+        # We already have a working file → reuse it
+        new_file = st.session_state.working_file
+        st.info(f"Re‑using existing file: `{os.path.basename(new_file)}`")
+
+    # --------------------------------------------------------------
+    # 2. Which column is still empty?
+    # --------------------------------------------------------------
+    b_has, c_has = check_column_status(new_file)
+
+    if not b_has:
+        target_column = "B"
+        reading_txt   = "1st reading"
+    elif not c_has:
+        target_column = "C"
+        reading_txt   = "2nd reading"
+    else:
+        # Both columns already filled → ask user
+        st.warning("Both columns B & C contain data.")
         target_column = st.radio("Select target column:", ["B", "C"], horizontal=True)
-    
+        reading_txt = "1st reading" if target_column == "B" else "2nd reading"
+
+    # --------------------------------------------------------------
+    # 3. UI metrics
+    # --------------------------------------------------------------
     col1, col2, col3 = st.columns([2, 2, 1])
-    
     with col1:
         st.metric("Components Ready", len(st.session_state.extracted_data))
-    
     with col2:
-        st.metric("Target Column", f"{target_column} ({'1st' if target_column == 'B' else '2nd'} reading)")
-    
+        st.metric("Target Column", f"{target_column} ({reading_txt})")
     with col3:
-        if st.button("📥 Populate Excel", type="primary"):
-            with st.spinner("Creating new file and populating data..."):
-                # Create working copy with exact formatting
-                new_file = create_working_copy()
-                
-                if new_file:
-                    # Populate the column
-                    success, result = populate_column(
-                        new_file, 
-                        st.session_state.extracted_data, 
-                        target_column
+        populate_btn = st.button("Populate Excel", type="primary")
+
+    # --------------------------------------------------------------
+    # 4. Perform the population
+    # --------------------------------------------------------------
+    if populate_btn:
+        with st.spinner("Populating data…"):
+            success, updates = populate_column(
+                new_file,
+                st.session_state.extracted_data,
+                target_column
+            )
+            if success:
+                st.session_state.upload_count += 1
+                st.success(f"Populated {updates} rows → **Column {target_column}**")
+                # Refresh column status for the next round
+                b_has, c_has = check_column_status(new_file)
+
+                # -----------------------------------------------------------------
+                # Download button (always the *current* working file)
+                # -----------------------------------------------------------------
+                with open(new_file, "rb") as f:
+                    st.download_button(
+                        label="Download Populated Excel File",
+                        data=f.read(),
+                        file_name=os.path.basename(new_file),
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary"
                     )
-                    
-                    if success:
-                        st.session_state.working_file = new_file
-                        st.session_state.upload_count += 1
-                        st.success(f"✅ Successfully populated {result} rows in Column {target_column}")
-                        st.success(f"📄 New file: `{os.path.basename(new_file)}`")
 
-                         # Download button
-                        with open(new_file, "rb") as f:
-                            st.download_button(
-                                label="⬇️ Download Populated Excel File",
-                                data=f.read(),
-                                file_name=os.path.basename(new_file),
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                type="primary"
-                            )
-                        
-                        st.info("💡 Ready for next upload - upload another image to populate the other column")
-                    else:
-                        st.error(f"❌ Error populating data: {result}")
+                # -----------------------------------------------------------------
+                # Inform user what can be done next
+                # -----------------------------------------------------------------
+                if b_has and c_has:
+                    st.success("Both readings are now complete!")
+                else:
+                    st.info("You can upload another image to fill the remaining column.")
+            else:
+                st.error(f"Population failed: {updates}")
+
 else:
-    st.warning("⚠️ No data available to populate. Upload an image first.")
-
+    st.warning("No data available to populate. Upload an image first.")
+    
 # Footer
 st.markdown("---")
 st.caption("💡 **Note:** Make sure Tesseract OCR is installed on your system")
