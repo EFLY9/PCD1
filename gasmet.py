@@ -37,7 +37,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🧾 Excel Template OCR Populator")
+st.title("🇸🇬 NEA Gasmet OCR Populator")
 st.markdown("---")
 
 
