@@ -391,45 +391,68 @@ st.markdown("---")
 
 # Section 4: Populate Excel
 # ==================== 4️⃣ POPULATE EXCEL (UPDATED) ====================
-
 st.header("4️⃣ Populate Excel File")
 
 if not st.session_state.extracted_data.empty:
     # --------------------------------------------------------------
-    # 1. Determine which file we are working on
+    # 1. Always create a *new* timestamped copy BEFORE populating
     # --------------------------------------------------------------
-    if st.session_state.working_file is None or not os.path.exists(st.session_state.working_file):
-        # No file yet → create the first copy
+    with st.spinner("Creating new timestamped file..."):
+        # Create a fresh copy of the ORIGINAL template
         new_file = create_working_copy()
-        if new_file:
-            st.session_state.working_file = new_file
-            st.info(f"Created new working file: `{os.path.basename(new_file)}`")
-        else:
+        if not new_file:
+            st.error("Failed to create working copy.")
             st.stop()
-    else:
-        # We already have a working file → reuse it
-        new_file = st.session_state.working_file
-        st.info(f"Re‑using existing file: `{os.path.basename(new_file)}`")
+
+        # If there was a previous working file, copy its filled data (B or C) into the new file
+        if st.session_state.working_file and os.path.exists(st.session_state.working_file):
+            try:
+                # Load old and new workbooks
+                old_wb = load_workbook(st.session_state.working_file)
+                new_wb = load_workbook(new_file)
+                old_ws = old_wb.active
+                new_ws = new_wb.active
+
+                # Copy values from columns B and C (rows 2–21) if they exist
+                for row_idx in range(2, 22):
+                    for col in ["B", "C"]:
+                        old_cell = old_ws[f"{col}{row_idx}"]
+                        new_cell = new_ws[f"{col}{row_idx}"]
+                        if old_cell.value is not None:
+                            # Preserve numeric type for conditional formatting
+                            try:
+                                new_cell.value = float(old_cell.value)
+                            except (ValueError, TypeError):
+                                new_cell.value = old_cell.value
+
+                new_wb.save(new_file)
+                new_wb.close()
+                old_wb.close()
+                st.info(f"Copied previous data from `{os.path.basename(st.session_state.working_file)}`")
+            except Exception as e:
+                st.warning(f"Could not copy previous data: {e}")
+
+        # Update session state
+        st.session_state.working_file = new_file
 
     # --------------------------------------------------------------
-    # 2. Which column is still empty?
+    # 2. Determine target column in the *new* file
     # --------------------------------------------------------------
     b_has, c_has = check_column_status(new_file)
 
     if not b_has:
         target_column = "B"
-        reading_txt   = "1st reading"
+        reading_txt = "1st reading"
     elif not c_has:
         target_column = "C"
-        reading_txt   = "2nd reading"
+        reading_txt = "2nd reading"
     else:
-        # Both columns already filled → ask user
-        st.warning("Both columns B & C contain data.")
+        st.warning("Both columns already have data in the new file.")
         target_column = st.radio("Select target column:", ["B", "C"], horizontal=True)
         reading_txt = "1st reading" if target_column == "B" else "2nd reading"
 
     # --------------------------------------------------------------
-    # 3. UI metrics
+    # 3. UI
     # --------------------------------------------------------------
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
@@ -440,10 +463,10 @@ if not st.session_state.extracted_data.empty:
         populate_btn = st.button("Populate Excel", type="primary")
 
     # --------------------------------------------------------------
-    # 4. Perform the population
+    # 4. Populate
     # --------------------------------------------------------------
     if populate_btn:
-        with st.spinner("Populating data…"):
+        with st.spinner("Populating data..."):
             success, updates = populate_column(
                 new_file,
                 st.session_state.extracted_data,
@@ -452,12 +475,9 @@ if not st.session_state.extracted_data.empty:
             if success:
                 st.session_state.upload_count += 1
                 st.success(f"Populated {updates} rows → **Column {target_column}**")
-                # Refresh column status for the next round
-                b_has, c_has = check_column_status(new_file)
+                st.success(f"New file: `{os.path.basename(new_file)}`")
 
-                # -----------------------------------------------------------------
-                # Download button (always the *current* working file)
-                # -----------------------------------------------------------------
+                # Download button
                 with open(new_file, "rb") as f:
                     st.download_button(
                         label="Download Populated Excel File",
@@ -467,13 +487,10 @@ if not st.session_state.extracted_data.empty:
                         type="primary"
                     )
 
-                # -----------------------------------------------------------------
-                # Inform user what can be done next
-                # -----------------------------------------------------------------
                 if b_has and c_has:
-                    st.success("Both readings are now complete!")
+                    st.success("Both readings complete!")
                 else:
-                    st.info("You can upload another image to fill the remaining column.")
+                    st.info("Upload another image to fill the remaining column.")
             else:
                 st.error(f"Population failed: {updates}")
 
