@@ -31,7 +31,11 @@ if "working_file" not in st.session_state:
 if "last_uploaded_file" not in st.session_state:
     st.session_state.last_uploaded_file = None
 
-st.set_page_config(page_title="Excel OCR Populator", page_icon="🧾", layout="wide")
+st.set_page_config(
+    page_title="Excel OCR Populator",
+    page_icon="https://www.sgcleaningxpert.com/wp-content/uploads/2017/10/NEA-Logo1.png",
+    layout="wide"
+)
 
 st.title("🧾 Excel Template OCR Populator")
 st.markdown("---")
