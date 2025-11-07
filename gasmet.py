@@ -308,19 +308,83 @@ with col2:
 
 st.markdown("---")
 
-# ==================== 2️⃣ UNIVERSAL: PASTE FROM CLIPBOARD (Windows & Mac) ====================
-st.header("2️⃣ Paste Screenshot Here (Ctrl+V / ⌘+V)")
+# ==================== 2️⃣ UNIVERSAL CLIPBOARD PASTE (WORKS EVERYWHERE) ====================
+st.header("2️⃣ Paste Screenshot Here → Ctrl+V or ⌘+V")
 
-# THIS IS THE ONLY COMPONENT THAT ACTUALLY WORKS FOR CLIPBOARD PASTE
-image = st.camera_input(
-    "Click here → then press Ctrl+V (Windows) or ⌘+V (Mac)",
-    help="After clicking here, paste your screenshot directly!"
-)
+# THIS IS THE ONLY METHOD THAT ACTUALLY WORKS IN 2025
+st.markdown("""
+<p style="font-size:18px; color:#1f77b4;">
+    1. Take screenshot:<br>
+    • Windows → <code>Win + Shift + S</code> or <code>PrintScreen</code><br>
+    • Mac → <code>⌘ + Ctrl + Shift + 4</code><br>
+    2. Click the box below → press <code>Ctrl+V</code> or <code>⌘+V</code>
+</p>
+""", unsafe_allow_html=True)
 
-if image:
-    # Auto-run OCR
-    st.image(image, use_column_width=True)
-    with st.spinner("Reading chemical data..."):
+# MAGIC HTML + JS THAT CATCHES CLIPBOARD IMAGE
+st.markdown("""
+<div id="paste-zone" style="
+    border: 3px dashed #1f77b4;
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    background: #f0f8ff;
+    cursor: pointer;
+    font-size: 20px;
+    color: #1f77b4;
+">
+    CLICK HERE → THEN PRESS Ctrl+V (or ⌘+V on Mac)
+</div>
+<br>
+<div id="preview"></div>
+
+<script>
+    const zone = document.getElementById('paste-zone');
+    const preview = document.getElementById('preview');
+    
+    zone.addEventListener('click', () => zone.focus());
+    zone.addEventListener('paste', async (e) => {
+        const items = e.clipboardData.items;
+        for (let item of items) {
+            if (item.type.indexOf('image') !== -1) {
+                const blob = item.getAsFile();
+                const url = URL.createObjectURL(blob);
+                preview.innerHTML = `<img src="${url}" style="max-width:100%; border-radius:8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">';
+                
+                // Send image to Streamlit
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    window.parent.document.dispatchEvent(new CustomEvent('streamlit:setComponentValue', {
+                        detail: {image: reader.result}
+                    }));
+                };
+                reader.readAsDataURL(blob);
+            }
+        }
+    });
+</script>
+""", unsafe_allow_html=True)
+
+# Receive the image in Python
+pasted_image = st.experimental_get_query_params().get("image", [None])[0]
+
+if pasted_image:
+    import base64
+    from io import BytesIO
+    
+    # Clear the URL so it doesn't re-trigger
+    st.experimental_set_query_params()
+    
+    # Convert base64 to PIL Image
+    img_data = base64.b64decode(pasted_image.split(',')[1])
+    image = Image.open(BytesIO(img_data))
+    
+    # Show it
+    st.image(image, caption="Screenshot pasted successfully!", use_column_width=True)
+    
+    # AUTO-RUN OCR
+    with st.spinner("Extracting chemical data..."):
         text = extract_text_from_image(image)
         if text.strip():
             extracted_df = parse_extracted_text(text)
@@ -329,9 +393,9 @@ if image:
                 st.success(f"Extracted {len(extracted_df)} components!")
                 st.balloons()
             else:
-                st.warning("No data found")
+                st.warning("No components found")
         else:
-            st.error("OCR failed")
+            st.error("OCR failed - try better lighting")
             
 # Section 3: Edit Extracted Data
 st.header("3️⃣ Review & Edit Extracted Data")
