@@ -308,63 +308,31 @@ with col2:
 
 st.markdown("---")
 
-# ==================== 2️⃣ PASTE IMAGE FROM CLIPBOARD (Corporate Friendly) ====================
-st.header("2️⃣ Paste Image from Clipboard (Ctrl+V)")
+# ==================== 2️⃣ UNIVERSAL: PASTE FROM CLIPBOARD (Windows & Mac) ====================
+st.header("2️⃣ Paste Screenshot Here (Ctrl+V / ⌘+V)")
 
-# Create a placeholder
-placeholder = st.empty()
-
-with placeholder.container():
-    st.info("📋 **How to use:**\n"
-            "1. Open your Gasmet screen / report\n"
-            "2. Press **PrintScreen** (or Snipping Tool → Copy)\n"
-            "3. Come back here and press **Ctrl+V**")
-    
-    st.markdown("<p style='color:#2E7D32; font-weight:bold;'>👇 Paste your image below 👇</p>", 
-                unsafe_allow_html=True)
-
-# This is the magic: a text_area that captures pasted images
-pasted_image = st.text_area(
-    "Paste image here (Ctrl+V)",
-    height=100,
-    key="paste_area",
-    help="After pasting, the image will appear automatically",
-    label_visibility="collapsed"
+# THIS IS THE ONLY COMPONENT THAT ACTUALLY WORKS FOR CLIPBOARD PASTE
+image = st.camera_input(
+    "Click here → then press Ctrl+V (Windows) or ⌘+V (Mac)",
+    help="After clicking here, paste your screenshot directly!"
 )
 
-# Detect pasted image
-if pasted_image and ("<img src=" in pasted_image or "data:image" in pasted_image):
-    import re
-    match = re.search(r'src=["\'](.*?)["\']', pasted_image)
-    if match:
-        img_data = match.group(1)
-        if img_data.startswith("data:image"):
-            import base64
-            from io import BytesIO
-            img_bytes = base64.b64decode(img_data.split(",")[1])
-            image = Image.open(BytesIO(img_bytes))
+if image:
+    # Auto-run OCR
+    st.image(image, use_column_width=True)
+    with st.spinner("Reading chemical data..."):
+        text = extract_text_from_image(image)
+        if text.strip():
+            extracted_df = parse_extracted_text(text)
+            if not extracted_df.empty:
+                st.session_state.extracted_data = extracted_df
+                st.success(f"Extracted {len(extracted_df)} components!")
+                st.balloons()
+            else:
+                st.warning("No data found")
+        else:
+            st.error("OCR failed")
             
-            # Clear the paste box
-            placeholder.empty()
-            
-            # Show the image
-            st.image(image, caption="Pasted image - ready for OCR", use_column_width=True)
-            
-            # Auto-run OCR
-            with st.spinner("Extracting text..."):
-                text = extract_text_from_image(image)
-                if text:
-                    with st.expander("View Raw Extracted Text"):
-                        st.text(text)
-                    extracted_df = parse_extracted_text(text)
-                    if not extracted_df.empty:
-                        st.session_state.extracted_data = extracted_df
-                        st.success(f"Extracted {len(extracted_df)} components")
-                    else:
-                        st.warning("No data found - try pasting again")
-                else:
-                    st.error("OCR failed - try a clearer screenshot")
-
 # Section 3: Edit Extracted Data
 st.header("3️⃣ Review & Edit Extracted Data")
 
