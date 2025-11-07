@@ -308,44 +308,62 @@ with col2:
 
 st.markdown("---")
 
-# Section 2: Upload Image & Auto Extract
-st.header("2️⃣ Upload Image (Auto Extract)")
+# ==================== 2️⃣ PASTE IMAGE FROM CLIPBOARD (Corporate Friendly) ====================
+st.header("2️⃣ Paste Image from Clipboard (Ctrl+V)")
 
-uploaded_file = st.file_uploader(
-    "Upload an image with component data",
-    type=["png", "jpg", "jpeg", "tiff", "bmp"],
-    help="Upload an image - text will be extracted automatically"
+# Create a placeholder
+placeholder = st.empty()
+
+with placeholder.container():
+    st.info("📋 **How to use:**\n"
+            "1. Open your Gasmet screen / report\n"
+            "2. Press **PrintScreen** (or Snipping Tool → Copy)\n"
+            "3. Come back here and press **Ctrl+V**")
+    
+    st.markdown("<p style='color:#2E7D32; font-weight:bold;'>👇 Paste your image below 👇</p>", 
+                unsafe_allow_html=True)
+
+# This is the magic: a text_area that captures pasted images
+pasted_image = st.text_area(
+    "Paste image here (Ctrl+V)",
+    height=100,
+    key="paste_area",
+    help="After pasting, the image will appear automatically",
+    label_visibility="collapsed"
 )
 
-# Auto-extract when new file is uploaded
-if uploaded_file is not None:
-    # Check if this is a new upload
-    file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-    
-    if st.session_state.last_uploaded_file != file_id:
-        st.session_state.last_uploaded_file = file_id
-        
-        with st.spinner("🔍 Extracting text from image..."):
-            # Extract text
-            text = extract_text_from_image(uploaded_file)
+# Detect pasted image
+if pasted_image and ("<img src=" in pasted_image or "data:image" in pasted_image):
+    import re
+    match = re.search(r'src=["\'](.*?)["\']', pasted_image)
+    if match:
+        img_data = match.group(1)
+        if img_data.startswith("data:image"):
+            import base64
+            from io import BytesIO
+            img_bytes = base64.b64decode(img_data.split(",")[1])
+            image = Image.open(BytesIO(img_bytes))
             
-            if text:
-                # Show raw text in expander
-                with st.expander("📄 View Raw Extracted Text"):
-                    st.text_area("Raw Text:", text, height=150)
-                
-                # Parse the text
-                extracted_df = parse_extracted_text(text)
-                
-                if not extracted_df.empty:
-                    st.session_state.extracted_data = extracted_df
-                    st.success(f"✅ Automatically extracted {len(extracted_df)} components")
+            # Clear the paste box
+            placeholder.empty()
+            
+            # Show the image
+            st.image(image, caption="Pasted image - ready for OCR", use_column_width=True)
+            
+            # Auto-run OCR
+            with st.spinner("Extracting text..."):
+                text = extract_text_from_image(image)
+                if text:
+                    with st.expander("View Raw Extracted Text"):
+                        st.text(text)
+                    extracted_df = parse_extracted_text(text)
+                    if not extracted_df.empty:
+                        st.session_state.extracted_data = extracted_df
+                        st.success(f"Extracted {len(extracted_df)} components")
+                    else:
+                        st.warning("No data found - try pasting again")
                 else:
-                    st.warning("⚠️ No component-concentration pairs found. Please enter data manually below.")
-            else:
-                st.error("❌ No text extracted from image")
-
-st.markdown("---")
+                    st.error("OCR failed - try a clearer screenshot")
 
 # Section 3: Edit Extracted Data
 st.header("3️⃣ Review & Edit Extracted Data")
