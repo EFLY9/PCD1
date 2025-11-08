@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import Protection
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageEnhance, ImageOps
 import pytesseract
 import re
 from datetime import datetime
-import os
 import io
 import shutil
+import cv2
 
 # Template path
 TEMPLATE_PATH = "Gasmet Reference Limits -Chemical Burning.xlsx"
@@ -284,226 +283,47 @@ def populate_column(excel_path, data_df, target_column):
         return False, str(e)
 
 
-# ==================== UI ====================
+# ==================== IMAGE CAPTURE, ENHANCEMENT & PREPROCESSING ====================
 
-# Section 1: Clear Template
-st.header("1️⃣ Clear Template Columns")
-col1, col2 = st.columns([3, 1])
+# Image Enhancement (Step 1)
+def preprocess_image(image):
+    """Enhance image for better OCR results."""
+    image = image.convert('L')  # Convert to grayscale
+    enhancer = ImageEnhance.Contrast(image)
+    image = enhancer.enhance(2.0)  # Increase contrast
+    image = ImageOps.autocontrast(image)  # Auto contrast to improve image quality
+    return image
 
-with col1:
-    st.info(f"📁 Template: `{os.path.basename(TEMPLATE_PATH)}`")
+# OpenCV Preprocessing (Step 2)
+def preprocess_with_opencv(image):
+    """Preprocess image using OpenCV techniques like denoising and thresholding."""
+    image_np = np.array(image)  # Convert PIL image to numpy array
+    image_blurred = cv2.GaussianBlur(image_np, (5, 5), 0)  # Apply Gaussian blur to reduce noise
+    _, image_thresh = cv2.threshold(image_blurred, 150, 255, cv2.THRESH_BINARY)  # Apply thresholding
+    return image_thresh
 
-with col2:
-    if st.button("🗑️ Clear Columns B & C", type="secondary"):
-        if os.path.exists(TEMPLATE_PATH):
-            success, result = clear_columns(TEMPLATE_PATH)
-            if success:
-                st.success(f"✅ Cleared {result} cells from columns B & C")
-                st.session_state.upload_count = 0  # Reset upload count
-                st.session_state.extracted_data = pd.DataFrame(columns=["Component", "Concentration"])
-            else:
-                st.error(f"❌ Error: {result}")
-        else:
-            st.error("❌ Template file not found!")
+# Streamlit UI for camera input (Image capture)
+captured_image = st.camera_input("Capture an image")
 
-st.markdown("---")
+if captured_image is not None:
+    # Open the captured image using PIL
+    image = Image.open(captured_image)
 
-# Section 2: Upload Image & Auto Extract
-st.header("2️⃣ Upload Image (Auto Extract)")
+    # Step 1: Enhance the image quality
+    enhanced_image = preprocess_image(image)
 
-uploaded_file = st.file_uploader(
-    "Upload an image with component data",
-    type=["png", "jpg", "jpeg", "tiff", "bmp"],
-    help="Upload an image - text will be extracted automatically"
-)
+    # Step 2: Preprocess with OpenCV (thresholding & denoising)
+    opencv_image = preprocess_with_opencv(enhanced_image)
 
-# Auto-extract when new file is uploaded
-if uploaded_file is not None:
-    # Check if this is a new upload
-    file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-    
-    if st.session_state.last_uploaded_file != file_id:
-        st.session_state.last_uploaded_file = file_id
-        
-        with st.spinner("🔍 Extracting text from image..."):
-            # Extract text
-            text = extract_text_from_image(uploaded_file)
-            
-            if text:
-                # Show raw text in expander
-                with st.expander("📄 View Raw Extracted Text"):
-                    st.text_area("Raw Text:", text, height=150)
-                
-                # Parse the text
-                extracted_df = parse_extracted_text(text)
-                
-                if not extracted_df.empty:
-                    st.session_state.extracted_data = extracted_df
-                    st.success(f"✅ Automatically extracted {len(extracted_df)} components")
-                else:
-                    st.warning("⚠️ No component-concentration pairs found. Please enter data manually below.")
-            else:
-                st.error("❌ No text extracted from image")
+    # Display the processed image for OCR
+    st.image(opencv_image, caption="Processed Image", use_column_width=True)
 
-st.markdown("---")
+    # Step 3: Perform OCR (using Tesseract for demonstration)
+    with st.spinner("🔍 Extracting text from image..."):
+        text = extract_text_from_image(opencv_image)
+        if text:
+            st.text_area("Extracted Text", text, height=150)
 
-# Section 3: Edit Extracted Data
-st.header("3️⃣ Review & Edit Extracted Data")
-
-if not st.session_state.extracted_data.empty:
-    st.info("✏️ Review and edit the extracted data if needed")
-    
-    # Show expected vs extracted
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Expected Components", len(EXPECTED_COMPONENTS))
-    with col2:
-        st.metric("Extracted Components", len(st.session_state.extracted_data))
-    
-    # Editable data editor
-    edited_df = st.data_editor(
-        st.session_state.extracted_data,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "Component": st.column_config.SelectboxColumn(
-                "Component Name",
-                options=EXPECTED_COMPONENTS,
-                width="medium",
-                required=True
-            ),
-            "Concentration": st.column_config.TextColumn("Concentration Value", width="medium")
-        },
-        hide_index=True
-    )
-    
-    # Update session state with edited data
-    st.session_state.extracted_data = edited_df
-else:
-    st.warning("📝 No data extracted yet. Upload an image above.")
-    
-    # Allow manual entry
-    if st.button("➕ Add Manual Entry"):
-        new_row = pd.DataFrame([{"Component": "", "Concentration": ""}])
-        st.session_state.extracted_data = pd.concat(
-            [st.session_state.extracted_data, new_row], 
-            ignore_index=True
-        )
-        st.rerun()
-
-st.markdown("---")
-
-# Section 4: Populate Excel
-# ==================== 4️⃣ POPULATE EXCEL (UPDATED) ====================
-st.header("4️⃣ Populate Excel File")
-
-if not st.session_state.extracted_data.empty:
-    # --------------------------------------------------------------
-    # 1. Always create a *new* timestamped copy BEFORE populating
-    # --------------------------------------------------------------
-    with st.spinner("Creating new timestamped file..."):
-        # Create a fresh copy of the ORIGINAL template
-        new_file = create_working_copy()
-        if not new_file:
-            st.error("Failed to create working copy.")
-            st.stop()
-
-        # If there was a previous working file, copy its filled data (B or C) into the new file
-        if st.session_state.working_file and os.path.exists(st.session_state.working_file):
-            try:
-                # Load old and new workbooks
-                old_wb = load_workbook(st.session_state.working_file)
-                new_wb = load_workbook(new_file)
-                old_ws = old_wb.active
-                new_ws = new_wb.active
-
-                # Copy values from columns B and C (rows 2–21) if they exist
-                for row_idx in range(2, 22):
-                    for col in ["B", "C"]:
-                        old_cell = old_ws[f"{col}{row_idx}"]
-                        new_cell = new_ws[f"{col}{row_idx}"]
-                        if old_cell.value is not None:
-                            # Preserve numeric type for conditional formatting
-                            try:
-                                new_cell.value = float(old_cell.value)
-                            except (ValueError, TypeError):
-                                new_cell.value = old_cell.value
-
-                new_wb.save(new_file)
-                new_wb.close()
-                old_wb.close()
-                st.info(f"Copied previous data from `{os.path.basename(st.session_state.working_file)}`")
-            except Exception as e:
-                st.warning(f"Could not copy previous data: {e}")
-
-        # Update session state
-        st.session_state.working_file = new_file
-
-    # --------------------------------------------------------------
-    # 2. Determine target column in the *new* file
-    # --------------------------------------------------------------
-    b_has, c_has = check_column_status(new_file)
-
-    if not b_has:
-        target_column = "B"
-        reading_txt = "1st reading"
-    elif not c_has:
-        target_column = "C"
-        reading_txt = "2nd reading"
-    else:
-        st.warning("Both columns already have data in the new file.")
-        target_column = st.radio("Select target column:", ["B", "C"], horizontal=True)
-        reading_txt = "1st reading" if target_column == "B" else "2nd reading"
-
-    # --------------------------------------------------------------
-    # 3. UI
-    # --------------------------------------------------------------
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        st.metric("Components Ready", len(st.session_state.extracted_data))
-    with col2:
-        st.metric("Target Column", f"{target_column} ({reading_txt})")
-    with col3:
-        populate_btn = st.button("Populate Excel", type="primary")
-
-    # --------------------------------------------------------------
-    # 4. Populate
-    # --------------------------------------------------------------
-    if populate_btn:
-        with st.spinner("Populating data..."):
-            success, updates = populate_column(
-                new_file,
-                st.session_state.extracted_data,
-                target_column
-            )
-            if success:
-                st.session_state.upload_count += 1
-                st.success(f"Populated {updates} rows → **Column {target_column}**")
-                st.success(f"New file: `{os.path.basename(new_file)}`")
-
-                # Download button
-                with open(new_file, "rb") as f:
-                    st.download_button(
-                        label="Download Populated Excel File",
-                        data=f.read(),
-                        file_name=os.path.basename(new_file),
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary"
-                    )
-
-                if b_has and c_has:
-                    st.success("Both readings complete!")
-                else:
-                    st.info("Upload another image to fill the remaining column.")
-            else:
-                st.error(f"Population failed: {updates}")
-
-else:
-    st.warning("No data available to populate. Upload an image first.")
-    
-# Footer
-st.markdown("---")
-st.caption("💡 **Note:** Make sure Tesseract OCR is installed on your system")
-st.caption("   • Mac: `brew install tesseract`")
-st.caption("   • Linux: `sudo apt-get install tesseract-ocr`")
-st.caption("   • Windows: Download from [GitHub](https://github.com/UB-Mannheim/tesseract/wiki)")
+            # Parse and display extracted components
+            extracted_df = parse_extracted_text(text)
+            st.dataframe(extracted_df)
